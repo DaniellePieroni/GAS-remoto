@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tabellone</title>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@800&display=swap" rel="stylesheet">
+  <!-- stile copiato da DisplaySheet-css.html (tabellone di script-1) -->
+  <style>
+    body { background-color: #f2ede4; }
+    @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+    .blinking-text { animation: blink 1s 60; }
+    .header-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.5em 2em; margin: 0.3em 0; }
+    h1 { font-size: 1.4em; margin: 0; font-family: "Trebuchet MS", Verdana, Geneva, Arial, Helvetica, sans-serif; }
+    .countdown { text-align: center; margin: 0; }
+    .countdown .digit { display: inline-block; position: relative; background: orange; color: black; border: 3px solid black; border-radius: 8px; font-family: monospace; font-weight: bold; font-size: 2.2em; line-height: 1.4em; width: 1em; text-align: center; margin: 0 0.06em; box-sizing: content-box; }
+    .countdown .separator { display: inline-block; font-weight: bold; font-size: 1.6em; color: black; margin: 0 0.05em; vertical-align: top; }
+    .countdown.tempo-scarso .digit { background: #ff5252; }
+    table { border-collapse: collapse; margin: 0 auto; font-family: Verdana, Geneva, Arial, Helvetica, sans-serif; }
+    td, th { position: relative; padding: 0.35em 0.5em; overflow: hidden; text-align: center; }
+    td.team-name, th.team-name { text-align: left; border-right: none; }
+    td.team-score, th.team-score { text-align: right; border-left: none; }
+    td.correct { background-color: #c6efce; border: 3px solid #4caf50; }
+    td.wrong { background-color: #ffc7ce; color: #9c0006; font-weight: bold; border: 3px solid #e53935; }
+    th.problem-header { background-color: #ffe4b3; }
+    th.problem-header .valore-problema { display: block; font-size: 1.15em; }
+    .jolly-badge { position: absolute; bottom: -0.25em; right: 0; font-weight: 800; font-size: 1.4em; color: black; font-family: "Baloo 2", sans-serif; line-height: 1; }
+    #stato { text-align: center; font-family: "Trebuchet MS", sans-serif; font-size: 1.5em; margin-top: 2em; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header-row">
+    <h1 style="color:blue">FISICA AL DENTE</h1>
+    <div id="countdown" class="countdown"></div>
+  </div>
+  <div id="stato">Caricamento del tabellone...</div>
+  <table border="1" id="tabella"></table>
+</div>
+
+<script>
+  // indirizzo /exec del progetto Apps Script "Gara remota - pubblico"
+  var URL_SCRIPT = "https://script.google.com/macros/s/AKfycbwaB-wZQUT9ogRKfhTJ6su4rWb4wN3NNnAMbqBOn4GN4cpjwaO8v_j6DRXxi7y7MTmzLQ/exec";
+
+  // stessa chiamata della pagina squadre: POST text/plain senza cookie, niente account Google di mezzo
+  function chiama(dati, ok, ko) {
+    fetch(URL_SCRIPT, {method: "POST", body: JSON.stringify(dati), credentials: "omit",
+                       headers: {"Content-Type": "text/plain;charset=utf-8"}})
+      .then(function(r) { if (!r.ok) { throw new Error(r.status); } return r.json(); })
+      .then(ok, ko);
+  }
+
+  var timeLeftMs = 0;
+
+  function cella(tag, classe, testo) {
+    var c = document.createElement(tag);
+    if (classe) { c.className = classe; }
+    if (testo !== undefined) { c.textContent = testo; }
+    return c;
+  }
+
+  // stessa costruzione della tabella di DisplaySheet.html, fatta nel browser invece che sul server
+  function disegna(sheetData) {
+    var tableData = sheetData.values;
+    var jollyData = sheetData.jolly;
+    var fcFlags = sheetData.fc || [];
+    var snapshot = {};
+    var points = [], fcRows = [];
+    for (var i = 2; i < tableData.length - 3; i++) {
+      if (fcFlags[i-2]) { fcRows.push(i-1); } else { points.push([tableData[i][1], i-1]); }
+    }
+    points.sort(function(a, b) { return b[0] - a[0]; });
+    var renderOrder = points.map(function(p) { return p[1]; }).concat(fcRows);
+
+    var tbl = document.getElementById("tabella");
+    tbl.innerHTML = "";
+
+    var tr = document.createElement("tr");
+    for (var j = 0; j < tableData[0].length - 2; j++) {
+      if (j == 0) { tr.appendChild(cella("th", "team-name")); }
+      else if (j == 1) { tr.appendChild(cella("th", "team-score")); }
+      else {
+        var th = cella("th", "problem-header", "P" + tableData[0][j]);
+        th.appendChild(cella("span", "valore-problema", tableData[1][j]));
+        tr.appendChild(th);
+      }
+    }
+    tbl.appendChild(tr);
+
+    for (var r = 2; r < tableData.length - 3; r++) {
+      var pi = renderOrder[r-2];
+      var riga = tableData[pi+1];
+      tr = document.createElement("tr");
+      for (var k = 0; k < riga.length - 2; k++) {
+        if (k == 0) { var n = cella("td", "team-name", riga[k]); n.style.fontWeight = "bold"; tr.appendChild(n); }
+        else if (k == 1) { var s = cella("td", "team-score", riga[k]); s.style.fontWeight = "bold"; tr.appendChild(s); }
+        else {
+          var rawValue = jollyData[pi-1][k];
+          var isJolly = Math.floor(Math.abs(rawValue)/1000) == 1;
+          var winfail = Math.abs(rawValue) % 1000;
+          var win = Math.floor(winfail/100);
+          var fail = winfail % 100;
+          var cellKey = pi + "_" + (k-1);
+          snapshot[cellKey] = Math.abs(rawValue);
+          var td = cella("td", (win != 0) ? "correct" : (fail > 0 ? "wrong" : ""), riga[k]);
+          td.setAttribute("data-cellkey", cellKey);
+          if (isJolly) { td.appendChild(cella("span", "jolly-badge", "J")); }
+          tr.appendChild(td);
+        }
+      }
+      tbl.appendChild(tr);
+    }
+
+    try {
+      aggiornaLampeggio(sheetData.raceStart, snapshot);
+    } catch (e) {
+      // se il browser blocca il localStorage si perde solo il lampeggio
+      console.warn("Lampeggio non disponibile:", e);
+    }
+  }
+
+  function aggiornaLampeggio(raceId, serverSnapshot) {
+    var storageKey = "tabellone_snapshot_" + raceId;
+    var prevRaw = localStorage.getItem(storageKey);
+    var prevSnapshot = prevRaw ? JSON.parse(prevRaw) : null;
+    if (prevSnapshot) {
+      for (var key in serverSnapshot) {
+        if (serverSnapshot[key] !== prevSnapshot[key]) {
+          var c = document.querySelector('[data-cellkey="' + key + '"]');
+          if (c) { c.classList.add("blinking-text"); }
+        }
+      }
+    }
+    localStorage.setItem(storageKey, JSON.stringify(serverSnapshot));
+    for (var i = localStorage.length - 1; i >= 0; i--) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf("tabellone_snapshot_") === 0 && k !== storageKey) { localStorage.removeItem(k); }
+    }
+  }
+
+  function formatoTempo(ms) {
+    if (ms <= 0) return "GARA TERMINATA!";
+    var totale = Math.floor(ms / 1000);
+    function due(n) { return (n < 10 ? "0" : "") + n; }
+    return due(Math.floor(totale / 3600)) + ":" + due(Math.floor((totale % 3600) / 60)) + ":" + due(totale % 60);
+  }
+
+  function aggiornaContatore() {
+    var el = document.getElementById("countdown");
+    var testo = formatoTempo(timeLeftMs);
+    el.innerHTML = "";
+    if (timeLeftMs <= 0) {
+      el.textContent = testo;
+    } else {
+      for (var i = 0; i < testo.length; i++) {
+        el.appendChild(cella("span", testo[i] === ":" ? "separator" : "digit", testo[i]));
+      }
+    }
+    el.classList.toggle("tempo-scarso", timeLeftMs > 0 && timeLeftMs < 5*60*1000);
+    if (timeLeftMs > 0) { timeLeftMs -= 1000; }
+  }
+
+  function adattaTabella() {
+    var tbl = document.getElementById("tabella");
+    tbl.style.fontSize = "";
+    var headerRow = document.querySelector(".header-row");
+    var spazioOccupato = headerRow ? headerRow.offsetHeight : 0;
+    var margine = 40;
+    var larghezzaNaturale = tbl.offsetWidth, altezzaNaturale = tbl.offsetHeight;
+    if (larghezzaNaturale === 0 || altezzaNaturale === 0) return;
+    var scala = Math.min((window.innerWidth - margine) / larghezzaNaturale, (window.innerHeight - spazioOccupato - margine) / altezzaNaturale);
+    tbl.style.fontSize = (parseFloat(getComputedStyle(tbl).fontSize) * scala) + "px";
+  }
+  window.addEventListener("resize", adattaTabella);
+
+  // come prima: i dati si leggono all'apertura; per aggiornarli si ricarica la pagina (F5)
+  function carica(tentativo) {
+    chiama({azione: "tabellone"}, function(dati) {
+      if (dati.errore) { document.getElementById("stato").textContent = dati.errore; return; }
+      document.getElementById("stato").style.display = "none";
+      disegna(dati);
+      timeLeftMs = dati.timeleft;
+      aggiornaContatore();
+      setInterval(aggiornaContatore, 1000);
+      adattaTabella();
+    }, function() {
+      // il foglio puo' essere a meta' riscrittura (avvio gara): si riprova da soli
+      document.getElementById("stato").textContent = "Aggiornamento...";
+      if (tentativo < 3) { setTimeout(function() { carica(tentativo + 1); }, 3000); }
+      else { document.getElementById("stato").textContent = "Tabellone non disponibile, ricaricare la pagina"; }
+    });
+  }
+  carica(0);
+</script>
+</body>
+</html>
