@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gara di fisica - invio risposte</title>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <style>
+      body { background: #fafafa; }
+      .container { max-width: 720px; }
+      .nascosto { display: none; }
+      #tempo { font-size: 2rem; font-weight: bold; color: #e65100; }
+      #tempo.scarso { color: #c62828; }
+      .griglia { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 16px; }
+      .prob { width: 64px; padding: 6px 0; text-align: center; border-radius: 6px; background: #eeeeee; position: relative; font-weight: bold; }
+      .prob small { display: block; font-weight: normal; font-size: .75rem; }
+      .prob.risolto { background: #66bb6a; color: white; }
+      .prob.errori { background: #ef9a9a; }
+      .prob .j { position: absolute; top: -6px; right: -6px; background: #ffab00; color: black; border-radius: 50%; width: 20px; height: 20px; font-size: .75rem; line-height: 20px; }
+      .msg { min-height: 1.5em; font-weight: bold; }
+      .ok { color: #2e7d32; }
+      .ko { color: #c62828; }
+      select.browser-default { margin-bottom: 12px; }
+      .card-panel h6 { margin-top: 0; font-weight: bold; }
+    </style>
+  </head>
+  <body>
+<div class="container">
+
+  <!-- accesso -->
+  <div id="schermoPin" class="card-panel" style="margin-top:40px">
+    <h5>Gara di fisica &ndash; invio risposte</h5>
+    <p>Inserisci il PIN della tua squadra.</p>
+    <div class="input-field">
+      <input id="pin" type="text" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">
+      <label for="pin">PIN squadra</label>
+    </div>
+    <button id="btnEntra" class="btn orange accent-4">Entra<i class="material-icons right">login</i></button>
+    <p id="msgPin" class="msg ko"></p>
+  </div>
+
+  <!-- gara -->
+  <div id="schermoGara" class="nascosto">
+    <div class="row" style="margin-top:20px; margin-bottom:0">
+      <div class="col s8"><h5 id="nomeSquadra"></h5></div>
+      <div class="col s4 right-align"><div id="tempo"></div></div>
+    </div>
+
+    <div class="griglia" id="griglia"></div>
+
+    <div class="card-panel">
+      <h6>Invia una risposta</h6>
+      <select id="problema" class="browser-default"></select>
+      <div class="input-field">
+        <input id="risposta" type="text" inputmode="decimal" autocomplete="off">
+        <label for="risposta">Risposta (numero, si pu&ograve; usare la virgola)</label>
+      </div>
+      <button id="btnInvia" class="btn orange accent-4">Invia<i class="material-icons right">send</i></button>
+      <p id="msgRisposta" class="msg"></p>
+    </div>
+
+    <div class="card-panel" id="boxJolly">
+      <h6>Scegli il jolly</h6>
+      <p>Il problema jolly vale doppio, nel bene e nel male. Si sceglie una volta sola e non pu&ograve; essere cambiato.</p>
+      <select id="problemaJolly" class="browser-default"></select>
+      <button id="btnJolly" class="btn orange accent-4">Conferma jolly<i class="material-icons right">star</i></button>
+      <p id="msgJolly" class="msg"></p>
+    </div>
+
+    <p>
+      <a href="https://script.google.com/macros/s/AKfycbwaB-wZQUT9ogRKfhTJ6su4rWb4wN3NNnAMbqBOn4GN4cpjwaO8v_j6DRXxi7y7MTmzLQ/exec?pagina=tabellone" target="_blank">Apri il tabellone</a>
+      &nbsp;&middot;&nbsp;
+      <a href="#" id="btnEsci">Esci</a>
+    </p>
+  </div>
+</div>
+
+<script>
+  // indirizzo /exec del progetto Apps Script "Gara remota - pubblico"
+  var URL_SCRIPT = "https://script.google.com/macros/s/AKfycbwaB-wZQUT9ogRKfhTJ6su4rWb4wN3NNnAMbqBOn4GN4cpjwaO8v_j6DRXxi7y7MTmzLQ/exec";
+
+  // chiama lo script: POST in text/plain (niente preflight CORS) e senza cookie,
+  // cosi' non entrano in gioco gli account Google del browser
+  function chiama(dati, ok, ko) {
+    fetch(URL_SCRIPT, {method: "POST", body: JSON.stringify(dati), credentials: "omit",
+                       headers: {"Content-Type": "text/plain;charset=utf-8"}})
+      .then(function(r) { if (!r.ok) { throw new Error(r.status); } return r.json(); })
+      .then(ok, ko);
+  }
+
+  var pin = "";
+  var stato = null;
+  var fineGara = 0;     // istante (ms, orologio locale) in cui scade la gara
+  var occupato = false; // evita doppi invii mentre una richiesta e' in corso
+
+  function el(id) { return document.getElementById(id); }
+  function messaggio(id, testo, ok) {
+    el(id).textContent = testo;
+    el(id).className = "msg " + (ok === undefined ? "" : (ok ? "ok" : "ko"));
+  }
+  function salvaPin(v) { try { sessionStorage.setItem("pinSquadra", v); } catch (e) {} }
+  function pinSalvato() { try { return sessionStorage.getItem("pinSquadra") || ""; } catch (e) { return ""; } }
+
+  function mostraAccesso(errore) {
+    pin = ""; stato = null; salvaPin("");
+    el("schermoGara").className = "nascosto";
+    el("schermoPin").className = "card-panel";
+    messaggio("msgPin", errore || "", false);
+  }
+
+  // ogni risposta del server porta {stato} oppure {errore}; un PIN non piu' attivo riporta all'accesso
+  function gestisci(r, idMsg) {
+    if (r.errore && r.errore.indexOf("PIN") === 0) { mostraAccesso(r.errore); return false; }
+    if (r.errore) { messaggio(idMsg, r.errore, false); return false; }
+    mostraStato(r.stato);
+    return true;
+  }
+
+  function mostraStato(s) {
+    stato = s;
+    fineGara = Date.now() + s.tempo;
+    el("schermoPin").className = "nascosto";
+    el("schermoGara").className = "";
+    el("nomeSquadra").textContent = s.nome;
+
+    var g = el("griglia"); g.innerHTML = "";
+    var opzRisp = '<option value="" disabled selected>Scegli il problema</option>';
+    var opzJolly = '<option value="" disabled selected>Scegli il problema jolly</option>';
+    s.problemi.forEach(function(p, i) {
+      var n = i + 1;
+      var d = document.createElement("div");
+      d.className = "prob" + (p.risolto ? " risolto" : (p.errori > 0 ? " errori" : ""));
+      d.innerHTML = "P" + n + "<small>" + (p.risolto ? "&#10003; risolto" : (p.errori > 0 ? p.errori + " errat" + (p.errori == 1 ? "a" : "e") : "&nbsp;")) + "</small>" + (p.jolly ? '<span class="j">J</span>' : "");
+      g.appendChild(d);
+      if (!p.risolto) {
+        opzRisp += '<option value="' + n + '">Problema ' + n + (p.jolly ? " (jolly)" : "") + '</option>';
+        opzJolly += '<option value="' + n + '">Problema ' + n + '</option>';
+      }
+    });
+    var scelto = el("problema").value;
+    el("problema").innerHTML = opzRisp;
+    if (scelto && el("problema").querySelector('option[value="' + scelto + '"]')) { el("problema").value = scelto; }
+    el("problemaJolly").innerHTML = opzJolly;
+    el("boxJolly").className = s.jollyScelto ? "nascosto" : "card-panel";
+  }
+
+  function erroreRete(idMsg) {
+    return function() { occupato = false; messaggio(idMsg, "Errore di connessione, riprovare", false); };
+  }
+
+  el("btnEntra").addEventListener("click", function() {
+    var v = el("pin").value.trim().toUpperCase();
+    if (!v) { messaggio("msgPin", "Inserire il PIN", false); return; }
+    messaggio("msgPin", "Verifica...");
+    chiama({azione: "entra", pin: v}, function(r) {
+      if (r.errore) { messaggio("msgPin", r.errore, false); return; }
+      pin = v; salvaPin(v);
+      messaggio("msgRisposta", ""); messaggio("msgJolly", "");
+      mostraStato(r.stato);
+    }, erroreRete("msgPin"));
+  });
+  el("pin").addEventListener("keydown", function(e) { if (e.key === "Enter") { el("btnEntra").click(); } });
+
+  el("btnInvia").addEventListener("click", function() {
+    if (occupato) { return; }
+    var np = el("problema").value;
+    var risp = el("risposta").value.trim();
+    if (!np || !risp) { messaggio("msgRisposta", "Scegliere il problema e scrivere la risposta", false); return; }
+    if (isNaN(Number(risp.replace(",", ".")))) { messaggio("msgRisposta", "Inserire un numero valido", false); return; }
+    if (!confirm("Inviare " + risp + " come risposta al problema " + np + "?\nUna risposta errata toglie punti.")) { return; }
+    occupato = true;
+    messaggio("msgRisposta", "Invio in corso...");
+    chiama({azione: "risposta", pin: pin, np: np, risp: risp}, function(r) {
+      occupato = false;
+      if (!gestisci(r, "msgRisposta")) { return; }
+      el("risposta").value = "";
+      messaggio("msgRisposta", r.corretta ? "Problema " + np + ": risposta CORRETTA!" : "Problema " + np + ": risposta errata", r.corretta);
+    }, erroreRete("msgRisposta"));
+  });
+
+  el("btnJolly").addEventListener("click", function() {
+    if (occupato) { return; }
+    var np = el("problemaJolly").value;
+    if (!np) { messaggio("msgJolly", "Scegliere il problema jolly", false); return; }
+    if (!confirm("Confermi il problema " + np + " come jolly? Non si potra' cambiare.")) { return; }
+    occupato = true;
+    messaggio("msgJolly", "Invio in corso...");
+    chiama({azione: "jolly", pin: pin, np: np}, function(r) {
+      occupato = false;
+      if (gestisci(r, "msgJolly")) { messaggio("msgRisposta", "Jolly impostato sul problema " + np, true); }
+    }, erroreRete("msgJolly"));
+  });
+
+  el("btnEsci").addEventListener("click", function(e) { e.preventDefault(); mostraAccesso(""); });
+
+  // conto alla rovescia locale
+  setInterval(function() {
+    if (!stato) { return; }
+    var ms = Math.max(0, fineGara - Date.now());
+    var t = Math.floor(ms / 1000);
+    function due(n) { return (n < 10 ? "0" : "") + n; }
+    el("tempo").textContent = ms > 0 ? Math.floor(t / 3600) + ":" + due(Math.floor(t % 3600 / 60)) + ":" + due(t % 60) : "TEMPO SCADUTO";
+    el("tempo").className = ms < 5*60*1000 ? "scarso" : "";
+  }, 1000);
+
+  // ogni minuto si ricontrolla lo stato: se l'operatore termina la gara il PIN si disattiva e si torna all'accesso
+  setInterval(function() {
+    if (!pin || occupato) { return; }
+    chiama({azione: "entra", pin: pin}, function(r) { gestisci(r, "msgRisposta"); }, function() {});
+  }, 60000);
+
+  // dopo un ricaricamento della pagina si rientra in automatico
+  (function() {
+    var v = pinSalvato();
+    if (v) { el("pin").value = v; el("btnEntra").click(); }
+  })();
+</script>
+  </body>
+</html>
