@@ -32,7 +32,7 @@
 
 <div class="container">
   <div class="header-row">
-    <h1 style="color:blue">FISICA AL DENTE</h1>
+    <h1 style="color:blue" id="titolo"></h1>
     <div id="countdown" class="countdown"></div>
   </div>
   <div id="stato">Caricamento del tabellone...</div>
@@ -179,6 +179,8 @@
     chiama({azione: "tabellone"}, function(dati) {
       if (dati.errore) { document.getElementById("stato").textContent = dati.errore; return; }
       document.getElementById("stato").style.display = "none";
+      document.getElementById("titolo").textContent = dati.titolo || "";
+      if (dati.titolo) { document.title = dati.titolo; }
       disegna(dati);
       timeLeftMs = dati.timeleft;
       aggiornaContatore();
