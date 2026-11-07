@@ -34,7 +34,7 @@
     <p>Inserisci il PIN della tua squadra.</p>
     <div class="input-field">
       <input id="pin" type="text" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">
-      <label for="pin">PIN squadra</label>
+      <label for="pin" class="active">PIN squadra</label>
     </div>
     <button id="btnEntra" class="btn orange accent-4">Entra<i class="material-icons right">login</i></button>
     <p id="msgPin" class="msg ko"></p>
@@ -54,7 +54,8 @@
       <select id="problema" class="browser-default"></select>
       <div class="input-field">
         <input id="risposta" type="text" inputmode="decimal" autocomplete="off">
-        <label for="risposta">Risposta (numero, si pu&ograve; usare la virgola)</label>
+        <label for="risposta" class="active">Risposta</label>
+        <span class="helper-text">Solo il numero: si pu&ograve; usare la virgola o il punto</span>
       </div>
       <button id="btnInvia" class="btn orange accent-4">Invia<i class="material-icons right">send</i></button>
       <p id="msgRisposta" class="msg"></p>
